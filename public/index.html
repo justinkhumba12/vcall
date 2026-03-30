@@ -24,16 +24,20 @@
         .filter-btn.disabled { opacity: 0.5; cursor: not-allowed; }
         .search-btn { background: linear-gradient(45deg, #198754, #20c997); border: none; border-radius: 16px; font-size: 1.25rem; letter-spacing: 1px; transition: all 0.3s ease; box-shadow: 0 8px 20px rgba(25, 135, 84, 0.3); }
         .search-btn:hover { background: linear-gradient(45deg, #157347, #1ba87e); box-shadow: 0 10px 25px rgba(25, 135, 84, 0.5); transform: scale(1.03); }
+        
         .fullscreen-video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; z-index: 1; transition: transform 0.3s ease; }
-        .floating-video { position: absolute; bottom: 120px; right: 20px; width: 130px; height: 180px; object-fit: cover; border: 3px solid #fff; border-radius: 15px; cursor: pointer; z-index: 10; background: #111; box-shadow: 0 5px 15px rgba(0,0,0,0.7); transition: all 0.3s ease; }
+        .floating-video { position: absolute; bottom: 120px; right: 20px; width: 130px; height: 180px; object-fit: cover; border: 3px solid #fff; border-radius: 15px; cursor: pointer; z-index: 10; background: #111; box-shadow: 0 5px 15px rgba(0,0,0,0.7); transition: all 0.3s ease; touch-action: none; }
         @media (min-width: 768px) { .floating-video { width: 200px; height: 150px; bottom: 130px; right: 30px; } }
+        
         .top-bar { position: absolute; top: 0; left: 0; width: 100%; padding: 20px 30px; display: flex; justify-content: center; align-items: center; z-index: 20; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); }
         .remote-status-icons { position: absolute; top: 20px; left: 20px; z-index: 30; display: flex; flex-direction: column; gap: 10px; }
         .status-icon-badge { display: none; background: rgba(0,0,0,0.65); padding: 12px; border-radius: 50%; color: #dc3545; font-size: 20px; width: 50px; height: 50px; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
-        .swap-cam-btn { position: absolute; top: 20px; right: 20px; z-index: 30; background: rgba(0,0,0,0.5); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; backdrop-filter: blur(5px); transition: 0.3s; }
+        
+        /* Moved Swap Cam Button Higher */
+        .swap-cam-btn { position: absolute; top: 15px; right: 15px; z-index: 50; background: rgba(0,0,0,0.5); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; backdrop-filter: blur(5px); transition: 0.3s; }
         .swap-cam-btn:hover { background: rgba(255,255,255,0.2); }
         
-        /* Updated Floating Action Button & Menu Controls */
+        /* Floating Action Button & Menu Controls */
         .fab-wrapper { position: absolute; bottom: 30px; right: 30px; display: flex; flex-direction: row-reverse; align-items: center; z-index: 40; gap: 15px; }
         .fab-toggle { width: 60px; height: 60px; border-radius: 50%; background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 5px 15px rgba(0,0,0,0.5); transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 41; outline: none; }
         .fab-toggle:hover { background: rgba(255,255,255,0.2); transform: scale(1.1); }
@@ -130,12 +134,14 @@
                     <input type="radio" class="btn-check" name="searchFilter" id="filterMale" value="male" autocomplete="off" disabled>
                     <label class="filter-btn disabled" for="filterMale">
                         <i class="fas fa-male mb-1 d-block fs-3"></i> 
-                        <span style="font-size: 0.85rem;" class="fw-normal">Male</span>
+                        <span style="font-size: 0.85rem;" class="fw-normal d-block">Male</span>
+                        <small style="font-size: 0.6rem; color: #ffca2c; display: block; margin-top: 2px;">Coming Soon</small>
                     </label>
                     <input type="radio" class="btn-check" name="searchFilter" id="filterFemale" value="female" autocomplete="off" disabled>
                     <label class="filter-btn disabled" for="filterFemale">
                         <i class="fas fa-female mb-1 d-block fs-3"></i> 
-                        <span style="font-size: 0.85rem;" class="fw-normal">Female</span>
+                        <span style="font-size: 0.85rem;" class="fw-normal d-block">Female</span>
+                        <small style="font-size: 0.6rem; color: #ffca2c; display: block; margin-top: 2px;">Coming Soon</small>
                     </label>
                 </div>
             </div>
@@ -207,6 +213,13 @@
         let connectionEstablished = false;
         let callStartTime = 0;
         let fabTimeout;
+        
+        // Dragging State for floating video
+        let isDragging = false;
+        let dragElement = null;
+        let dragStartY = 0;
+        let videoStartTop = 0;
+        let wasDragged = false;
 
         // WebRTC
         const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -326,6 +339,79 @@
             }
         }
 
+        /* --- Floating Video Drag Logic --- */
+        callScreen.addEventListener('mousedown', dragStart);
+        callScreen.addEventListener('touchstart', dragStart, { passive: false });
+
+        document.addEventListener('mousemove', dragMove);
+        document.addEventListener('touchmove', dragMove, { passive: false });
+
+        document.addEventListener('mouseup', dragEnd);
+        document.addEventListener('touchend', dragEnd);
+
+        function dragStart(e) {
+            if (e.target.classList.contains('floating-video')) {
+                isDragging = true;
+                dragElement = e.target;
+                wasDragged = false;
+                dragStartY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+                
+                const rect = dragElement.getBoundingClientRect();
+                videoStartTop = rect.top;
+                
+                dragElement.style.bottom = 'auto'; // Disable default bottom layout while dragging
+                dragElement.style.top = videoStartTop + 'px';
+                dragElement.style.transition = 'none';
+            }
+        }
+
+        function dragMove(e) {
+            if (!isDragging || !dragElement) return;
+            e.preventDefault(); // Prevent scrolling issues on touch devices
+            
+            const y = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+            const deltaY = y - dragStartY;
+            
+            if (Math.abs(deltaY) > 5) {
+                wasDragged = true;
+            }
+            
+            let newTop = videoStartTop + deltaY;
+            const maxTop = window.innerHeight - dragElement.offsetHeight;
+            
+            if (newTop < 0) newTop = 0;
+            if (newTop > maxTop) newTop = maxTop;
+            
+            dragElement.style.top = newTop + 'px';
+        }
+
+        function dragEnd(e) {
+            if (!isDragging || !dragElement) return;
+            isDragging = false;
+            
+            dragElement.style.transition = 'all 0.3s ease';
+            
+            // Check position and snap it to top or bottom to avoid sitting at the center
+            const rect = dragElement.getBoundingClientRect();
+            const centerY = rect.top + rect.height / 2;
+            const screenCenterY = window.innerHeight / 2;
+            
+            if (centerY < screenCenterY) {
+                // Snap to top (leaving room for swap cam icon)
+                dragElement.style.top = '80px';
+                dragElement.style.bottom = 'auto';
+            } else {
+                // Snap to bottom (leaving room for FAB)
+                dragElement.style.top = 'auto';
+                dragElement.style.bottom = '120px';
+            }
+            
+            dragElement = null;
+            setTimeout(() => { wasDragged = false; }, 100); // Allow click events to check drag status
+        }
+
+
+        /* --- Core App Logic --- */
         function registerUser() {
             socket.emit('register', (response) => {
                 if (response.success) {
@@ -371,6 +457,10 @@
             currentFacingMode = 'user';
             remoteFacingMode = 'user';
             iceCandidatesQueue = [];
+            
+            // Reset position of floating video
+            video1.style.top = ''; video1.style.bottom = '';
+            video2.style.top = ''; video2.style.bottom = '';
             
             updateVideoTransforms();
         }
@@ -507,11 +597,17 @@
             } else {
                 video1.className = 'floating-video'; video2.className = 'fullscreen-video';
             }
+            // Reset inline styles applied during dragging
+            video1.style.top = ''; video1.style.bottom = '';
+            video2.style.top = ''; video2.style.bottom = '';
         }
 
         callScreen.addEventListener('click', (e) => {
             if (e.target.closest('.control-btn') || e.target.closest('.swap-cam-btn') || e.target.closest('.fab-wrapper')) return;
-            if (e.target.classList.contains('floating-video')) swapVideos();
+            // Prevent swapping if the interaction was dragging
+            if (e.target.classList.contains('floating-video') && !wasDragged) {
+                swapVideos();
+            }
         });
 
         function toggleMute() {
