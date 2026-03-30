@@ -1,0 +1,14 @@
+{
+  "name": "vchat-websockets",
+  "version": "1.0.0",
+  "description": "Random Video Call using WebRTC and Socket.IO",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "mysql2": "^3.6.1",
+    "socket.io": "^4.7.2"
+  }
+}
