@@ -32,9 +32,15 @@
         .status-icon-badge { display: none; background: rgba(0,0,0,0.65); padding: 12px; border-radius: 50%; color: #dc3545; font-size: 20px; width: 50px; height: 50px; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
         .swap-cam-btn { position: absolute; top: 20px; right: 20px; z-index: 30; background: rgba(0,0,0,0.5); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; backdrop-filter: blur(5px); transition: 0.3s; }
         .swap-cam-btn:hover { background: rgba(255,255,255,0.2); }
-        .controls-wrapper { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; justify-content: center; z-index: 20; transition: opacity 0.5s ease, transform 0.5s ease; }
-        .controls { background: rgba(0,0,0,0.65); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); padding: 15px 35px; border-radius: 50px; display: flex; gap: 20px; border: 1px solid rgba(255,255,255,0.1); }
-        .control-btn { border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 22px; display: flex; align-items: center; justify-content: center; color: white; background: rgba(255,255,255,0.15); cursor: pointer; transition: 0.2s; outline: none; }
+        
+        /* Updated Floating Action Button & Menu Controls */
+        .fab-wrapper { position: absolute; bottom: 30px; right: 30px; display: flex; flex-direction: row-reverse; align-items: center; z-index: 40; gap: 15px; }
+        .fab-toggle { width: 60px; height: 60px; border-radius: 50%; background: rgba(0,0,0,0.65); border: 1px solid rgba(255,255,255,0.2); color: white; font-size: 24px; display: flex; align-items: center; justify-content: center; cursor: pointer; box-shadow: 0 5px 15px rgba(0,0,0,0.5); transition: all 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); z-index: 41; outline: none; }
+        .fab-toggle:hover { background: rgba(255,255,255,0.2); transform: scale(1.1); }
+        .fab-toggle.active { transform: rotate(45deg); background: rgba(220, 53, 69, 0.9); border-color: transparent; }
+        .fab-menu { display: flex; gap: 12px; background: rgba(0,0,0,0.65); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); padding: 10px 20px; border-radius: 40px; border: 1px solid rgba(255,255,255,0.1); opacity: 0; visibility: hidden; transform: translateX(30px) scale(0.9); transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); pointer-events: none; }
+        .fab-menu.active { opacity: 1; visibility: visible; transform: translateX(0) scale(1); pointer-events: auto; }
+        .control-btn { border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 18px; display: flex; align-items: center; justify-content: center; color: white; background: rgba(255,255,255,0.15); cursor: pointer; transition: 0.2s; outline: none; }
         .control-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); transform: scale(1.1); }
         .control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .btn-danger { background: #dc3545 !important; }
@@ -42,6 +48,7 @@
         .btn-primary { background: #0d6efd !important; }
         .btn-light-green { background-color: #28a745 !important; color: #ffffff !important; box-shadow: 0 0 15px rgba(40, 167, 69, 0.5); }
         .btn-light-green:hover { background-color: #218838 !important; transform: scale(1.1); }
+        
         .search-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 999; flex-direction: column; align-items: center; justify-content: center; }
         .search-overlay.active { display: flex; }
         .spinner-border { width: 5rem; height: 5rem; margin-bottom: 25px; color: #0dcaf0; }
@@ -165,12 +172,16 @@
         <video id="video1" autoplay playsinline class="floating-video"></video>
         <video id="video2" autoplay playsinline class="fullscreen-video"></video>
 
-        <div id="controls-wrapper" class="controls-wrapper">
-            <div class="controls">
-                <button class="control-btn" id="muteBtn" onclick="toggleMute()" title="Mute Microphone"><i class="fas fa-microphone"></i></button>
-                <button class="control-btn" id="soundBtn" onclick="toggleSound()" title="Disable Sound"><i class="fas fa-volume-up"></i></button>
-                <button class="control-btn btn-primary" id="nextBtn" onclick="showNextModal()" title="Next Partner"><i class="fas fa-step-forward"></i></button>
-                <button class="control-btn btn-danger" id="hangupBtn" onclick="showHangupModal()" title="Hangup"><i class="fas fa-phone-slash"></i></button>
+        <!-- Wrapped Controls FAB Menu -->
+        <div class="fab-wrapper">
+            <button id="fabToggleBtn" class="fab-toggle" onclick="toggleFabMenu()" title="Show Controls">
+                <i class="fas fa-plus"></i>
+            </button>
+            <div id="fabMenu" class="fab-menu" onmouseenter="clearMenuTimer()" onmouseleave="startMenuTimer()">
+                <button class="control-btn" id="muteBtn" onclick="toggleMute(); startMenuTimer();" title="Mute Microphone"><i class="fas fa-microphone"></i></button>
+                <button class="control-btn" id="soundBtn" onclick="toggleSound(); startMenuTimer();" title="Disable Sound"><i class="fas fa-volume-up"></i></button>
+                <button class="control-btn btn-primary" id="nextBtn" onclick="showNextModal(); closeFabMenu();" title="Next Partner"><i class="fas fa-step-forward"></i></button>
+                <button class="control-btn btn-danger" id="hangupBtn" onclick="showHangupModal(); closeFabMenu();" title="Hangup"><i class="fas fa-phone-slash"></i></button>
             </div>
         </div>
     </div>
@@ -195,6 +206,7 @@
         // Timers and locks
         let connectionEstablished = false;
         let callStartTime = 0;
+        let fabTimeout;
 
         // WebRTC
         const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
@@ -279,6 +291,41 @@
             setTimeout(() => { alertBox.style.display = 'none'; }, 4000);
         }
 
+        /* --- Floating Action Menu Logic --- */
+        function toggleFabMenu() {
+            const toggleBtn = document.getElementById('fabToggleBtn');
+            if (toggleBtn.classList.contains('active')) {
+                closeFabMenu();
+            } else {
+                openFabMenu();
+            }
+        }
+
+        function openFabMenu() {
+            document.getElementById('fabToggleBtn').classList.add('active');
+            document.getElementById('fabMenu').classList.add('active');
+            startMenuTimer();
+        }
+
+        function closeFabMenu() {
+            document.getElementById('fabToggleBtn').classList.remove('active');
+            document.getElementById('fabMenu').classList.remove('active');
+            clearMenuTimer();
+        }
+
+        function startMenuTimer() {
+            clearMenuTimer();
+            fabTimeout = setTimeout(() => {
+                closeFabMenu();
+            }, 3000); // hide after 3 seconds
+        }
+
+        function clearMenuTimer() {
+            if (fabTimeout) {
+                clearTimeout(fabTimeout);
+            }
+        }
+
         function registerUser() {
             socket.emit('register', (response) => {
                 if (response.success) {
@@ -307,7 +354,7 @@
             connectingOverlay.style.display = 'flex'; 
             hangupBtn.innerHTML = '<i class="fas fa-phone-slash"></i>';
             hangupBtn.className = 'control-btn btn-danger';
-            hangupBtn.onclick = showHangupModal;
+            hangupBtn.onclick = () => { showHangupModal(); closeFabMenu(); };
 
             document.getElementById('muteBtn').innerHTML = '<i class="fas fa-microphone"></i>';
             document.getElementById('muteBtn').classList.remove('btn-danger');
@@ -316,6 +363,8 @@
 
             document.getElementById('remote-mic-muted').style.display = 'none';
             document.getElementById('remote-speaker-muted').style.display = 'none';
+            
+            closeFabMenu();
 
             connectionEstablished = false;
             callStartTime = 0;
@@ -461,7 +510,7 @@
         }
 
         callScreen.addEventListener('click', (e) => {
-            if (e.target.closest('.control-btn') || e.target.closest('.swap-cam-btn')) return;
+            if (e.target.closest('.control-btn') || e.target.closest('.swap-cam-btn') || e.target.closest('.fab-wrapper')) return;
             if (e.target.classList.contains('floating-video')) swapVideos();
         });
 
@@ -507,7 +556,7 @@
             
             hangupBtn.innerHTML = '<i class="fas fa-home"></i>';
             hangupBtn.className = 'control-btn btn-light-green';
-            hangupBtn.onclick = goHome;
+            hangupBtn.onclick = () => { goHome(); closeFabMenu(); };
             showAlert("Partner has left the call.");
             cleanupCall();
         }
@@ -546,6 +595,7 @@
             }
             callScreen.style.display = 'none';
             document.getElementById('home-screen').style.display = 'flex';
+            closeFabMenu();
         }
     </script>
 </body>
