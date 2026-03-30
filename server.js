@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -6,176 +7,164 @@ const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+    cors: { origin: "*" }
+});
 
-// Middleware
-app.use(express.json());
+// Serve the frontend HTML files
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Database Connection (Uses Railway Environment Variables)
-const pool = mysql.createPool({
+// Database Connection (Railway provides these environment variables)
+const dbConfig = {
     host: process.env.MYSQLHOST || 'localhost',
-    user: process.env.MYSQLUSER || 'jmcstor1_admin',
-    password: process.env.MYSQLPASSWORD || 'Ragaifun1@',
-    database: process.env.MYSQLDATABASE || 'jmcstor1_vchat',
-    port: process.env.MYSQLPORT || 3306,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0
-});
+    user: process.env.MYSQLUSER || 'root',
+    password: process.env.MYSQLPASSWORD || '',
+    database: process.env.MYSQLDATABASE || 'vchat',
+    port: process.env.MYSQLPORT || 3306
+};
 
-// In-Memory State
-let queue = [];
-let activeCalls = new Map(); // call_id -> { caller, receiver }
-let userSockets = new Map(); // user_id -> socket.id
-
-io.on('connection', (socket) => {
-    
-    // 1. User Registration & Connection
-    socket.on('register', async (requestedUserId, callback) => {
-        let uid = requestedUserId;
-        if (!uid) {
-            uid = Math.floor(Math.random() * 900000000) + 100000000;
-            uid = uid.toString();
-        }
-        socket.userId = uid;
-        userSockets.set(uid, socket.id);
-
-        try {
-            await pool.query("INSERT IGNORE INTO users (user_id, name, gender) VALUES (?, 'Anonymous', 'unknown')", [uid]);
-            await pool.query("UPDATE users SET last_seen = NOW() WHERE user_id = ?", [uid]);
-        } catch (e) {
-            console.error("DB Error on register:", e);
-        }
-
-        if (callback) callback({ user_id: uid });
-    });
-
-    // 2. Matchmaking Queue
-    socket.on('join_queue', () => {
-        if (!socket.userId) return;
-        if (!queue.includes(socket.userId)) {
-            queue.push(socket.userId);
-        }
-        checkQueue();
-    });
-
-    socket.on('leave_queue', () => {
-        queue = queue.filter(id => id !== socket.userId);
-    });
-
-    // 3. WebRTC Signaling (Direct Peer-to-Peer Routing)
-    socket.on('signal', (data) => {
-        const { partner_id, type, payload } = data;
-        const partnerSocketId = userSockets.get(partner_id);
-        
-        if (partnerSocketId) {
-            io.to(partnerSocketId).emit('signal', { type, payload });
-        }
-    });
-
-    // 4. End Call
-    socket.on('end_call', async (data) => {
-        const { call_id, partner_id } = data;
-        const partnerSocketId = userSockets.get(partner_id);
-        
-        if (partnerSocketId) {
-            io.to(partnerSocketId).emit('partner_left');
-        }
-        
-        activeCalls.delete(call_id);
-        try {
-            await pool.query("UPDATE calls SET status = 'ended', end_time = NOW() WHERE call_id = ?", [call_id]);
-        } catch (e) {}
-    });
-
-    // 5. Disconnect Handling
-    socket.on('disconnect', async () => {
-        if (!socket.userId) return;
-        
-        // Remove from queue
-        queue = queue.filter(id => id !== socket.userId);
-        
-        // Find if user was in an active call
-        const callEntry = [...activeCalls.entries()].find(([id, call]) => call.caller === socket.userId || call.receiver === socket.userId);
-        
-        if (callEntry) {
-            const [call_id, call] = callEntry;
-            const partnerId = call.caller === socket.userId ? call.receiver : call.caller;
-            const partnerSocketId = userSockets.get(partnerId);
-            
-            if (partnerSocketId) {
-                io.to(partnerSocketId).emit('partner_left');
-            }
-            
-            activeCalls.delete(call_id);
-            try {
-                await pool.query("UPDATE calls SET status = 'ended', end_time = NOW() WHERE call_id = ?", [call_id]);
-            } catch (e) {}
-        }
-        
-        userSockets.delete(socket.userId);
-    });
-});
-
-// Matchmaking Logic
-async function checkQueue() {
-    if (queue.length >= 2) {
-        const callerId = queue.shift();
-        const receiverId = queue.shift();
-        const callId = `call_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-
-        const callerSocket = userSockets.get(callerId);
-        const receiverSocket = userSockets.get(receiverId);
-
-        if (callerSocket && receiverSocket) {
-            activeCalls.set(callId, { caller: callerId, receiver: receiverId });
-
-            // Notify both users
-            io.to(callerSocket).emit('match_found', { call_id: callId, partner_id: receiverId, is_caller: true });
-            io.to(receiverSocket).emit('match_found', { call_id: callId, partner_id: callerId, is_caller: false });
-
-            // Log call to database
-            try {
-                await pool.query("INSERT INTO calls (call_id, caller_id, receiver_id, status) VALUES (?, ?, ?, 'connecting')", [callId, callerId, receiverId]);
-            } catch (e) {
-                console.error("DB Error on call start:", e);
-            }
-        } else {
-            // If someone disconnected right before matching, put the other back
-            if (callerSocket) queue.push(callerId);
-            if (receiverSocket) queue.push(receiverId);
-        }
-    }
+let pool;
+try {
+    pool = mysql.createPool(dbConfig);
+    console.log("Database pool configured.");
+} catch (e) {
+    console.error("Failed to connect to MySQL", e);
 }
 
-// Basic Admin API for Admin Panel
-app.post('/api/admin/login', (req, res) => {
-    const { username, password } = req.body;
-    // Hardcoded simple admin check matching original PHP
-    if (username === 'kariangna' && password === 'kariangna') {
-        res.json({ success: true, token: 'admin-token-123' });
-    } else {
-        res.status(401).json({ success: false });
-    }
-});
+// In-memory queue and active users mapping
+let waitingQueue = []; // Users waiting for a match
+const activeCalls = new Map(); // Map socket.id to their partner's socket.id
+const userMap = new Map(); // Map socket.id to their DB user_id
 
-app.get('/api/admin/stats', async (req, res) => {
-    if (req.headers.authorization !== 'admin-token-123') return res.status(401).json({error: 'Unauthorized'});
-    try {
-        const [users] = await pool.query("SELECT COUNT(*) as c FROM users");
-        const [calls] = await pool.query("SELECT COUNT(*) as c FROM calls WHERE status = 'connecting' OR status = 'active'");
-        res.json({
-            total_users: users[0].c,
-            active_calls: calls[0].c,
-            users_in_queue: queue.length // Taken directly from memory, much faster!
-        });
-    } catch (e) {
-        res.status(500).json({ error: 'Database error' });
-    }
+io.on('connection', (socket) => {
+    console.log(`User connected: ${socket.id}`);
+
+    // 1. Register User
+    socket.on('register', async (callback) => {
+        const userId = Math.floor(100000000 + Math.random() * 900000000).toString();
+        userMap.set(socket.id, userId);
+        
+        try {
+            if (pool) {
+                await pool.execute(
+                    "INSERT INTO users (user_id) VALUES (?)",
+                    [userId]
+                );
+            }
+            callback({ success: true, user_id: userId });
+        } catch (error) {
+            console.error(error);
+            callback({ success: false, error: 'Database error' });
+        }
+    });
+
+    // 2. Re-authenticate returning user
+    socket.on('auth', (userId) => {
+        userMap.set(socket.id, userId);
+        if (pool) pool.execute("UPDATE users SET last_seen = NOW() WHERE user_id = ?", [userId]).catch(()=>{}).catch(()=>{});
+    });
+
+    // 3. Start Matchmaking (Queue)
+    socket.on('start_search', async () => {
+        const userId = userMap.get(socket.id);
+        if (!userId) return;
+
+        // If someone is waiting in the queue, match them!
+        if (waitingQueue.length > 0) {
+            const partnerSocket = waitingQueue.shift(); // Get the first person waiting
+            
+            // Ensure partner is still connected and isn't ourselves
+            if (partnerSocket.id !== socket.id && io.sockets.sockets.get(partnerSocket.id)) {
+                const partnerUserId = userMap.get(partnerSocket.id);
+                
+                // Save Call to Database
+                let callId = null;
+                if (pool) {
+                    try {
+                        const [result] = await pool.execute(
+                            "INSERT INTO calls (caller_id, receiver_id) VALUES (?, ?)",
+                            [partnerUserId, userId]
+                        );
+                        callId = result.insertId;
+                    } catch(e) { console.error(e); }
+                }
+
+                // Map them to each other
+                activeCalls.set(socket.id, partnerSocket.id);
+                activeCalls.set(partnerSocket.id, socket.id);
+
+                // Tell both users they found a match
+                // Partner acts as Caller, Current Socket acts as Receiver
+                partnerSocket.emit('match_found', { 
+                    call_id: callId, 
+                    partner_id: userId, 
+                    is_caller: true 
+                });
+                
+                socket.emit('match_found', { 
+                    call_id: callId, 
+                    partner_id: partnerUserId, 
+                    is_caller: false 
+                });
+                
+                return;
+            }
+        }
+
+        // If no one is waiting, join the queue
+        if (!waitingQueue.includes(socket)) {
+            waitingQueue.push(socket);
+        }
+    });
+
+    // 4. Leave Queue (Cancel Search)
+    socket.on('cancel_search', () => {
+        waitingQueue = waitingQueue.filter(s => s.id !== socket.id);
+    });
+
+    // 5. Instant WebRTC Signaling (No Database needed here!)
+    socket.on('signal', (data) => {
+        const partnerId = activeCalls.get(socket.id);
+        if (partnerId && io.sockets.sockets.get(partnerId)) {
+            // Forward the exact signal payload to the partner instantly
+            io.to(partnerId).emit('signal', data);
+        }
+    });
+
+    // 6. End Call
+    socket.on('end_call', async (callId) => {
+        const partnerId = activeCalls.get(socket.id);
+        
+        if (partnerId) {
+            io.to(partnerId).emit('partner_left'); // Tell partner
+            activeCalls.delete(partnerId);
+        }
+        activeCalls.delete(socket.id);
+
+        if (pool && callId) {
+            pool.execute("UPDATE calls SET status = 'ended', end_time = NOW() WHERE id = ?", [callId]).catch(()=>{});
+        }
+    });
+
+    // 7. Handle Disconnect
+    socket.on('disconnect', () => {
+        console.log(`User disconnected: ${socket.id}`);
+        
+        // Remove from queue
+        waitingQueue = waitingQueue.filter(s => s.id !== socket.id);
+        
+        // Notify partner if in a call
+        const partnerId = activeCalls.get(socket.id);
+        if (partnerId) {
+            io.to(partnerId).emit('partner_left');
+            activeCalls.delete(partnerId);
+            activeCalls.delete(socket.id);
+        }
+        userMap.delete(socket.id);
+    });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`WebSocket server running on port ${PORT}`);
 });
