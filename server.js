@@ -14,13 +14,19 @@ const io = new Server(server, {
 // Serve the frontend HTML files
 app.use(express.static(path.join(__dirname, 'public')));
 
+// Health check endpoint for Railway stability
+app.get('/health', (req, res) => res.status(200).send('OK'));
+
 // Database Connection (Railway provides these environment variables)
 const dbConfig = {
     host: process.env.MYSQLHOST || 'mysql.railway.internal',
     user: process.env.MYSQLUSER || 'root',
     password: process.env.MYSQLPASSWORD || 'ksvizXCvRfxOpKhaDUgjemkdNAnFausZ',
     database: process.env.MYSQLDATABASE || 'vchat',
-    port: process.env.MYSQLPORT || 3306
+    port: process.env.MYSQLPORT || 3306,
+    waitForConnections: true,
+    connectionLimit: 10,
+    queueLimit: 0
 };
 
 let pool;
@@ -53,7 +59,7 @@ io.on('connection', (socket) => {
             }
             callback({ success: true, user_id: userId });
         } catch (error) {
-            console.error(error);
+            console.error("DB Error on register:", error);
             callback({ success: false, error: 'Database error' });
         }
     });
@@ -61,7 +67,11 @@ io.on('connection', (socket) => {
     // 2. Re-authenticate returning user
     socket.on('auth', (userId) => {
         userMap.set(socket.id, userId);
-        if (pool) pool.execute("UPDATE users SET last_seen = NOW() WHERE user_id = ?", [userId]).catch(()=>{}).catch(()=>{});
+        if (pool) {
+            // Added .catch to prevent unhandled promise rejections crashing the server
+            pool.execute("UPDATE users SET last_seen = NOW() WHERE user_id = ?", [userId])
+                .catch((err) => console.error("DB Error on auth update:", err));
+        }
     });
 
     // 3. Start Matchmaking (Queue)
@@ -86,7 +96,9 @@ io.on('connection', (socket) => {
                             [partnerUserId, userId]
                         );
                         callId = result.insertId;
-                    } catch(e) { console.error(e); }
+                    } catch(e) { 
+                        console.error("DB Error on start_search:", e); 
+                    }
                 }
 
                 // Map them to each other
@@ -94,7 +106,6 @@ io.on('connection', (socket) => {
                 activeCalls.set(partnerSocket.id, socket.id);
 
                 // Tell both users they found a match
-                // Partner acts as Caller, Current Socket acts as Receiver
                 partnerSocket.emit('match_found', { 
                     call_id: callId, 
                     partner_id: userId, 
@@ -142,7 +153,9 @@ io.on('connection', (socket) => {
         activeCalls.delete(socket.id);
 
         if (pool && callId) {
-            pool.execute("UPDATE calls SET status = 'ended', end_time = NOW() WHERE id = ?", [callId]).catch(()=>{});
+            // Added .catch to prevent crash on end call
+            pool.execute("UPDATE calls SET status = 'ended', end_time = NOW() WHERE id = ?", [callId])
+                .catch(err => console.error("DB Error on end_call:", err));
         }
     });
 
@@ -165,6 +178,8 @@ io.on('connection', (socket) => {
 });
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
+
+// Binding specifically to '0.0.0.0' is required for Railway deployments to stay alive
+server.listen(PORT, '0.0.0.0', () => {
     console.log(`WebSocket server running on port ${PORT}`);
 });
