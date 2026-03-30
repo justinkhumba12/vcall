@@ -1,4 +1,8 @@
-require('dotenv').config();
+try {
+    require('dotenv').config();
+} catch (e) {
+    console.log("dotenv not found. Relying on native environment variables (e.g., Railway).");
+}
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
