@@ -9,24 +9,44 @@ const http = require('http');
 const { Server } = require('socket.io');
 const mysql = require('mysql2/promise');
 const path = require('path');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: "*" }
-});
 
-// Serve the frontend HTML files from the "public" folder
+// ==========================================
+// SECURITY: HTTP Headers & Rate Limiting
+// ==========================================
+
+// Helmet secures Express apps by setting various HTTP headers.
+// Content Security Policy is disabled here to allow the inline scripts/styles in your current index.html.
+// In a production app with separate JS/CSS files, you should enable and configure CSP.
+app.use(helmet({
+    contentSecurityPolicy: false, 
+}));
+
+// Basic Rate Limiting to prevent HTTP DDoS/Brute Force
+const apiLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 100, // Limit each IP to 100 requests per windowMs
+    message: "Too many requests from this IP, please try again later."
+});
+app.use('/', apiLimiter);
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Health check endpoint for Railway stability
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// Database Connection with your specific Railway credentials
+// ==========================================
+// SECURITY: Database Connection Configuration
+// ==========================================
+// Removed hardcoded sensitive passwords. Always rely on Environment Variables.
 const dbConfig = {
     host: process.env.MYSQLHOST || 'mysql.railway.internal',
     user: process.env.MYSQLUSER || 'root',
-    password: process.env.MYSQLPASSWORD || 'ksvizXCvRfxOpKhaDUgjemkdNAnFausZ',
+    password: process.env.MYSQLPASSWORD, 
     database: process.env.MYSQLDATABASE || 'railway',
     port: process.env.MYSQLPORT || 3306,
     waitForConnections: true,
@@ -35,25 +55,21 @@ const dbConfig = {
 };
 
 let pool;
-try {
-    pool = mysql.createPool(dbConfig);
-    console.log("Database pool configured with Railway credentials.");
-    
-    // Test the connection immediately on startup and create tables if missing
-    pool.getConnection()
-        .then(async (conn) => {
+if (dbConfig.password) {
+    try {
+        pool = mysql.createPool(dbConfig);
+        console.log("Database pool configured.");
+        
+        // Test connection and initialize tables
+        pool.getConnection().then(async (conn) => {
             console.log("Successfully connected to MySQL database!");
-            
             try {
-                // Auto-create the users table
                 await conn.query(`
                     CREATE TABLE IF NOT EXISTS users (
                         user_id VARCHAR(255) PRIMARY KEY,
                         last_seen DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
                     )
                 `);
-                
-                // Auto-create the calls table
                 await conn.query(`
                     CREATE TABLE IF NOT EXISTS calls (
                         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -67,32 +83,80 @@ try {
                 console.log("Database tables verified/created successfully.");
             } catch (tableError) {
                 console.error("Error creating tables:", tableError);
+            } finally {
+                conn.release();
             }
-            
-            conn.release();
-        })
-        .catch(err => {
+        }).catch(err => {
             console.error("Failed to connect to MySQL database on startup:", err);
         });
-} catch (e) {
-    console.error("Failed to initialize MySQL pool:", e);
+    } catch (e) {
+        console.error("Failed to initialize MySQL pool:", e);
+    }
+} else {
+    console.warn("WARNING: MYSQLPASSWORD is not set. Database connections will likely fail.");
 }
 
-// In-memory queue and active users mapping
-let waitingQueue = []; // Users waiting for a match
-const activeCalls = new Map(); // Map socket.id to their partner's socket.id
-const userMap = new Map(); // Map socket.id to their DB user_id
+// ==========================================
+// SECURITY: WebSockets Configuration
+// ==========================================
+const io = new Server(server, {
+    cors: { 
+        // Best practice: Restrict origin to your actual frontend domain instead of "*"
+        origin: process.env.ALLOWED_ORIGIN || "https://vcall-production.up.railway.app/", 
+        methods: ["GET", "POST"]
+    },
+    // Prevent large payloads (default is 1MB, WebRTC signaling is very small)
+    maxHttpBufferSize: 5e4 // 50 KB limit
+});
+
+// In-memory state
+let waitingQueue = []; 
+const activeCalls = new Map(); 
+const userMap = new Map(); 
+
+// SECURITY Helper: Input Validation
+const isValidUserId = (id) => typeof id === 'string' && /^\d{9}$/.test(id);
+const isValidCallId = (id) => typeof id === 'number' && id > 0 && Number.isInteger(id);
 
 io.on('connection', (socket) => {
     console.log(`User connected: ${socket.id}`);
 
+    // SECURITY: Socket Event Rate Limiting (Prevent flood attacks)
+    let eventCount = 0;
+    let lastReset = Date.now();
+    const RATE_LIMIT_WINDOW = 1000; // 1 second
+    const MAX_EVENTS_PER_WINDOW = 30; // Max 30 socket events per second per user
+
+    socket.use((packet, next) => {
+        const now = Date.now();
+        if (now - lastReset > RATE_LIMIT_WINDOW) {
+            eventCount = 0;
+            lastReset = now;
+        }
+        eventCount++;
+        if (eventCount > MAX_EVENTS_PER_WINDOW) {
+            console.warn(`[SECURITY] Rate limit exceeded by socket: ${socket.id}`);
+            return next(new Error('Rate limit exceeded. Disconnecting.'));
+        }
+        next();
+    });
+
+    socket.on("error", (err) => {
+        if (err && err.message === 'Rate limit exceeded. Disconnecting.') {
+            socket.disconnect();
+        }
+    });
+
     // 1. Register User
     socket.on('register', async (callback) => {
+        if (typeof callback !== 'function') return;
+
         const userId = Math.floor(100000000 + Math.random() * 900000000).toString();
         userMap.set(socket.id, userId);
         
         try {
             if (pool) {
+                // Prepared statements automatically sanitize SQL inputs
                 await pool.execute(
                     "INSERT INTO users (user_id) VALUES (?)",
                     [userId]
@@ -101,12 +165,18 @@ io.on('connection', (socket) => {
             callback({ success: true, user_id: userId });
         } catch (error) {
             console.error("DB Error on register:", error);
-            callback({ success: false, error: 'Database error' });
+            // SECURITY: Never leak database error details to the client
+            callback({ success: false, error: 'Internal server error' });
         }
     });
 
     // 2. Re-authenticate returning user
     socket.on('auth', (userId) => {
+        // SECURITY: Validate userId format
+        if (!isValidUserId(userId)) {
+            return console.warn(`[SECURITY] Invalid auth userId attempt: ${userId}`);
+        }
+
         userMap.set(socket.id, userId);
         if (pool) {
             pool.execute("UPDATE users SET last_seen = NOW() WHERE user_id = ?", [userId])
@@ -119,15 +189,14 @@ io.on('connection', (socket) => {
         const userId = userMap.get(socket.id);
         if (!userId) return;
 
-        // If someone is waiting in the queue, match them!
+        // If someone is waiting in the queue, match them
         if (waitingQueue.length > 0) {
-            const partnerSocket = waitingQueue.shift(); // Get the first person waiting
+            const partnerSocket = waitingQueue.shift(); 
             
             // Ensure partner is still connected and isn't ourselves
             if (partnerSocket.id !== socket.id && io.sockets.sockets.get(partnerSocket.id)) {
                 const partnerUserId = userMap.get(partnerSocket.id);
                 
-                // Save Call to Database
                 let callId = null;
                 if (pool) {
                     try {
@@ -141,11 +210,9 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                // Map them to each other
                 activeCalls.set(socket.id, partnerSocket.id);
                 activeCalls.set(partnerSocket.id, socket.id);
 
-                // Tell both users they found a match
                 partnerSocket.emit('match_found', { 
                     call_id: callId, 
                     partner_id: userId, 
@@ -175,6 +242,9 @@ io.on('connection', (socket) => {
 
     // 5. Instant WebRTC Signaling
     socket.on('signal', (data) => {
+        // SECURITY: Ensure data exists and doesn't exceed reasonable boundaries
+        if (!data || typeof data !== 'object') return;
+
         const partnerId = activeCalls.get(socket.id);
         if (partnerId && io.sockets.sockets.get(partnerId)) {
             io.to(partnerId).emit('signal', data);
@@ -183,10 +253,13 @@ io.on('connection', (socket) => {
 
     // 6. End Call
     socket.on('end_call', async (callId) => {
+        // SECURITY: Validate callId is a valid number to prevent SQL injection or type errors
+        if (callId !== null && !isValidCallId(callId)) return;
+
         const partnerId = activeCalls.get(socket.id);
         
         if (partnerId) {
-            io.to(partnerId).emit('partner_left'); // Tell partner
+            io.to(partnerId).emit('partner_left'); 
             activeCalls.delete(partnerId);
         }
         activeCalls.delete(socket.id);
@@ -201,10 +274,8 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
         console.log(`User disconnected: ${socket.id}`);
         
-        // Remove from queue
         waitingQueue = waitingQueue.filter(s => s.id !== socket.id);
         
-        // Notify partner if in a call
         const partnerId = activeCalls.get(socket.id);
         if (partnerId) {
             io.to(partnerId).emit('partner_left');
@@ -217,7 +288,6 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Binding specifically to '0.0.0.0' is required for Railway deployments to stay alive
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`WebSocket server running on port ${PORT}`);
 });
