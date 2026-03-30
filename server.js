@@ -1,8 +1,9 @@
 try {
     require('dotenv').config();
 } catch (e) {
-    console.log("dotenv not found. Relying on native environment variables (e.g., Railway).");
+    console.log("dotenv not found. Relying on native environment variables.");
 }
+
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -15,13 +16,13 @@ const io = new Server(server, {
     cors: { origin: "*" }
 });
 
-// Serve the frontend HTML files
+// Serve the frontend HTML files from the "public" folder
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Health check endpoint for Railway stability
 app.get('/health', (req, res) => res.status(200).send('OK'));
 
-// Database Connection (Railway provides these environment variables)
+// Database Connection with your specific Railway credentials
 const dbConfig = {
     host: process.env.MYSQLHOST || 'mysql.railway.internal',
     user: process.env.MYSQLUSER || 'root',
@@ -36,9 +37,19 @@ const dbConfig = {
 let pool;
 try {
     pool = mysql.createPool(dbConfig);
-    console.log("Database pool configured.");
+    console.log("Database pool configured with Railway credentials.");
+    
+    // Test the connection immediately on startup
+    pool.getConnection()
+        .then(conn => {
+            console.log("Successfully connected to MySQL database!");
+            conn.release();
+        })
+        .catch(err => {
+            console.error("Failed to connect to MySQL database on startup:", err);
+        });
 } catch (e) {
-    console.error("Failed to connect to MySQL", e);
+    console.error("Failed to initialize MySQL pool:", e);
 }
 
 // In-memory queue and active users mapping
@@ -72,7 +83,6 @@ io.on('connection', (socket) => {
     socket.on('auth', (userId) => {
         userMap.set(socket.id, userId);
         if (pool) {
-            // Added .catch to prevent unhandled promise rejections crashing the server
             pool.execute("UPDATE users SET last_seen = NOW() WHERE user_id = ?", [userId])
                 .catch((err) => console.error("DB Error on auth update:", err));
         }
@@ -137,11 +147,10 @@ io.on('connection', (socket) => {
         waitingQueue = waitingQueue.filter(s => s.id !== socket.id);
     });
 
-    // 5. Instant WebRTC Signaling (No Database needed here!)
+    // 5. Instant WebRTC Signaling
     socket.on('signal', (data) => {
         const partnerId = activeCalls.get(socket.id);
         if (partnerId && io.sockets.sockets.get(partnerId)) {
-            // Forward the exact signal payload to the partner instantly
             io.to(partnerId).emit('signal', data);
         }
     });
@@ -157,7 +166,6 @@ io.on('connection', (socket) => {
         activeCalls.delete(socket.id);
 
         if (pool && callId) {
-            // Added .catch to prevent crash on end call
             pool.execute("UPDATE calls SET status = 'ended', end_time = NOW() WHERE id = ?", [callId])
                 .catch(err => console.error("DB Error on end_call:", err));
         }
