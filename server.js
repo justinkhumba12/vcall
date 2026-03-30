@@ -16,9 +16,9 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // Database Connection (Railway provides these environment variables)
 const dbConfig = {
-    host: process.env.MYSQLHOST || 'localhost',
+    host: process.env.MYSQLHOST || 'mysql.railway.internal',
     user: process.env.MYSQLUSER || 'root',
-    password: process.env.MYSQLPASSWORD || '',
+    password: process.env.MYSQLPASSWORD || 'ksvizXCvRfxOpKhaDUgjemkdNAnFausZ',
     database: process.env.MYSQLDATABASE || 'vchat',
     port: process.env.MYSQLPORT || 3306
 };
