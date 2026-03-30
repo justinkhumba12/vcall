@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Random Video Call</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* Exact same styling as provided by user */
+        body { background: linear-gradient(135deg, #0f2027, #203a43, #2c5364); color: #ffffff; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; padding: 0; overflow: hidden; }
+        #home-screen { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100dvh; padding: 20px; position: relative; }
+        #call-screen { display: none; width: 100vw; height: 100dvh; position: relative; background: #000; overflow: hidden; }
+        .registration-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(15, 32, 39, 0.95); backdrop-filter: blur(15px); -webkit-backdrop-filter: blur(15px); z-index: 2000; display: none; flex-direction: column; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.5s ease; }
+        .registration-screen.active { opacity: 1; }
+        .reg-card { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 30px; padding: 40px 30px; width: 90%; max-width: 400px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.5); transform: translateY(40px) scale(0.95); transition: transform 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .registration-screen.active .reg-card { transform: translateY(0) scale(1); }
+        .glass-card { background: rgba(255, 255, 255, 0.08); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 30px; box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5); padding: 30px 25px; width: 100%; max-width: 450px; text-align: center; transition: transform 0.3s ease, box-shadow 0.3s ease; }
+        .hero-title { font-size: 2.8rem; font-weight: 800; background: -webkit-linear-gradient(#0dcaf0, #0d6efd); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 5px; letter-spacing: -1px; }
+        .filter-container { display: flex; background: rgba(0, 0, 0, 0.4); border-radius: 20px; padding: 6px; margin-bottom: 15px; border: 1px solid rgba(255, 255, 255, 0.08); box-shadow: inset 0 4px 10px rgba(0,0,0,0.5); }
+        .filter-btn { flex: 1; border-radius: 15px; padding: 10px 5px; border: none; background: transparent; color: rgba(255, 255, 255, 0.5); transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1); cursor: pointer; text-align: center; margin: 0; }
+        .btn-check:checked + .filter-btn { background: linear-gradient(135deg, #0d6efd, #0dcaf0); color: #fff; box-shadow: 0 8px 20px rgba(13, 202, 240, 0.4); transform: scale(1.02); }
+        .filter-btn:hover:not(.active-check):not(.disabled) { color: rgba(255, 255, 255, 0.9); }
+        .filter-btn.disabled { opacity: 0.5; cursor: not-allowed; }
+        .search-btn { background: linear-gradient(45deg, #198754, #20c997); border: none; border-radius: 16px; font-size: 1.25rem; letter-spacing: 1px; transition: all 0.3s ease; box-shadow: 0 8px 20px rgba(25, 135, 84, 0.3); }
+        .search-btn:hover { background: linear-gradient(45deg, #157347, #1ba87e); box-shadow: 0 10px 25px rgba(25, 135, 84, 0.5); transform: scale(1.03); }
+        .fullscreen-video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; z-index: 1; transition: transform 0.3s ease; }
+        .floating-video { position: absolute; bottom: 120px; right: 20px; width: 130px; height: 180px; object-fit: cover; border: 3px solid #fff; border-radius: 15px; cursor: pointer; z-index: 10; background: #111; box-shadow: 0 5px 15px rgba(0,0,0,0.7); transition: all 0.3s ease; }
+        @media (min-width: 768px) { .floating-video { width: 200px; height: 150px; bottom: 130px; right: 30px; } }
+        .top-bar { position: absolute; top: 0; left: 0; width: 100%; padding: 20px 30px; display: flex; justify-content: center; align-items: center; z-index: 20; background: linear-gradient(to bottom, rgba(0,0,0,0.8), transparent); }
+        .remote-status-icons { position: absolute; top: 20px; left: 20px; z-index: 30; display: flex; flex-direction: column; gap: 10px; }
+        .status-icon-badge { display: none; background: rgba(0,0,0,0.65); padding: 12px; border-radius: 50%; color: #dc3545; font-size: 20px; width: 50px; height: 50px; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.2); backdrop-filter: blur(5px); box-shadow: 0 4px 10px rgba(0,0,0,0.5); }
+        .swap-cam-btn { position: absolute; top: 20px; right: 20px; z-index: 30; background: rgba(0,0,0,0.5); color: white; border: 1px solid rgba(255,255,255,0.2); border-radius: 50%; width: 50px; height: 50px; display: flex; align-items: center; justify-content: center; font-size: 1.2rem; cursor: pointer; backdrop-filter: blur(5px); transition: 0.3s; }
+        .swap-cam-btn:hover { background: rgba(255,255,255,0.2); }
+        .controls-wrapper { position: absolute; bottom: 30px; left: 0; width: 100%; display: flex; justify-content: center; z-index: 20; transition: opacity 0.5s ease, transform 0.5s ease; }
+        .controls { background: rgba(0,0,0,0.65); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); padding: 15px 35px; border-radius: 50px; display: flex; gap: 20px; border: 1px solid rgba(255,255,255,0.1); }
+        .control-btn { border: none; border-radius: 50%; width: 60px; height: 60px; font-size: 22px; display: flex; align-items: center; justify-content: center; color: white; background: rgba(255,255,255,0.15); cursor: pointer; transition: 0.2s; outline: none; }
+        .control-btn:hover:not(:disabled) { background: rgba(255,255,255,0.3); transform: scale(1.1); }
+        .control-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .btn-danger { background: #dc3545 !important; }
+        .btn-danger:hover:not(:disabled) { background: #bb2d3b !important; }
+        .btn-primary { background: #0d6efd !important; }
+        .btn-light-green { background-color: #28a745 !important; color: #ffffff !important; box-shadow: 0 0 15px rgba(40, 167, 69, 0.5); }
+        .btn-light-green:hover { background-color: #218838 !important; transform: scale(1.1); }
+        .search-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 999; flex-direction: column; align-items: center; justify-content: center; }
+        .search-overlay.active { display: flex; }
+        .spinner-border { width: 5rem; height: 5rem; margin-bottom: 25px; color: #0dcaf0; }
+        .call-connecting-overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+        .custom-alert { display: none; position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 9999; min-width: 300px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+    </style>
+</head>
+<body>
+    <div id="customAlert" class="alert alert-danger custom-alert alert-dismissible fade show" role="alert">
+        <span id="customAlertText"></span>
+        <button type="button" class="btn-close" onclick="document.getElementById('customAlert').style.display='none'"></button>
+    </div>
+
+    <!-- Registration Screen -->
+    <div id="registration-screen" class="registration-screen">
+        <div class="reg-card">
+            <div class="mb-3"><i class="fas fa-video text-info" style="font-size: 3rem;"></i></div>
+            <h3 class="fw-bold mb-2">Welcome to VChat</h3>
+            <p class="text-muted mb-4 small">Connect with random people around the world instantly.</p>
+            <button class="btn btn-info text-white w-100 py-3 rounded-3 fw-bold shadow-lg" onclick="registerUser()">Start Chatting <i class="fas fa-arrow-right ms-2"></i></button>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div class="modal fade" id="confirmNextModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content bg-dark text-white border-secondary shadow-lg">
+                <div class="modal-body text-center p-4">
+                    <div class="mb-3 text-primary"><i class="fas fa-step-forward fa-3x"></i></div>
+                    <h5 class="fw-bold mb-2">Find Next Partner?</h5>
+                    <p class="text-muted small mb-4">This will end your current call.</p>
+                    <div class="d-flex justify-content-center gap-2">
+                        <button type="button" class="btn btn-secondary px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary px-4 rounded-pill" onclick="executeNextCall()">Yes, Next</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal fade" id="confirmHangupModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content bg-dark text-white border-secondary shadow-lg">
+                <div class="modal-body text-center p-4">
+                    <div class="mb-3 text-danger"><i class="fas fa-phone-slash fa-3x"></i></div>
+                    <h5 class="fw-bold mb-2">Hang Up?</h5>
+                    <p class="text-muted small mb-4">Are you sure you want to leave this call?</p>
+                    <div class="d-flex justify-content-center gap-2">
+                        <button type="button" class="btn btn-secondary px-4 rounded-pill" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-danger px-4 rounded-pill" onclick="executeEndCall()">Hang Up</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Home Screen -->
+    <div id="home-screen">
+        <div class="top-bar">
+            <h3 class="m-0 hero-title"><i class="fas fa-video"></i> VChat</h3>
+        </div>
+        <div class="glass-card">
+            <div class="mb-3">
+                <div style="width: 60px; height: 60px; background: rgba(255,255,255,0.1); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto; font-size: 1.6rem; color: #0dcaf0; box-shadow: 0 0 20px rgba(13, 202, 240, 0.2);">
+                    <i class="fas fa-globe-americas"></i>
+                </div>
+            </div>
+            <h3 class="mb-1 fw-bold text-white">Find a Partner</h3>
+            <p class="text-muted mb-3 small">Meet new people around the world instantly.</p>
+            
+            <div class="mb-3">
+                <label class="form-label text-light small fw-bold text-uppercase tracking-wide mb-2 d-block">Filter Partner By:</label>
+                <div class="filter-container">
+                    <input type="radio" class="btn-check" name="searchFilter" id="filterRandom" value="random" autocomplete="off" checked>
+                    <label class="filter-btn" for="filterRandom">
+                        <i class="fas fa-random mb-1 d-block fs-3"></i> 
+                        <span style="font-size: 0.85rem;" class="fw-normal">Random</span>
+                    </label>
+                    <input type="radio" class="btn-check" name="searchFilter" id="filterMale" value="male" autocomplete="off" disabled>
+                    <label class="filter-btn disabled" for="filterMale">
+                        <i class="fas fa-male mb-1 d-block fs-3"></i> 
+                        <span style="font-size: 0.85rem;" class="fw-normal">Male</span>
+                    </label>
+                    <input type="radio" class="btn-check" name="searchFilter" id="filterFemale" value="female" autocomplete="off" disabled>
+                    <label class="filter-btn disabled" for="filterFemale">
+                        <i class="fas fa-female mb-1 d-block fs-3"></i> 
+                        <span style="font-size: 0.85rem;" class="fw-normal">Female</span>
+                    </label>
+                </div>
+            </div>
+            <button class="btn search-btn w-100 py-3 fw-bold text-white mt-2" onclick="startSearch()">
+                <i class="fas fa-video me-2"></i> Start Matching
+            </button>
+        </div>
+    </div>
+
+    <div id="search-overlay" class="search-overlay">
+        <div class="spinner-border" role="status"></div>
+        <h3 class="text-white fw-bold">Looking for someone...</h3>
+        <p class="text-info mt-2">Connecting to the online queue</p>
+        <button class="btn btn-outline-danger mt-4 px-5 rounded-pill" onclick="cancelSearch()">Cancel</button>
+    </div>
+
+    <!-- Call Screen -->
+    <div id="call-screen">
+        <div id="callConnectingOverlay" class="call-connecting-overlay">
+            <div class="spinner-border" role="status"></div>
+            <h4 class="text-white fw-bold mt-4">Connecting to Partner...</h4>
+            <p class="text-muted">Syncing video streams</p>
+        </div>
+
+        <div class="swap-cam-btn" onclick="swapCamera()" title="Swap Camera">
+            <i class="fas fa-sync-alt"></i>
+        </div>
+
+        <div class="remote-status-icons">
+            <div id="remote-mic-muted" class="status-icon-badge" title="Partner Muted Microphone"><i class="fas fa-microphone-slash"></i></div>
+            <div id="remote-speaker-muted" class="status-icon-badge" title="Partner Disabled Audio"><i class="fas fa-volume-mute"></i></div>
+        </div>
+
+        <video id="video1" autoplay playsinline class="floating-video"></video>
+        <video id="video2" autoplay playsinline class="fullscreen-video"></video>
+
+        <div id="controls-wrapper" class="controls-wrapper">
+            <div class="controls">
+                <button class="control-btn" id="muteBtn" onclick="toggleMute()" title="Mute Microphone"><i class="fas fa-microphone"></i></button>
+                <button class="control-btn" id="soundBtn" onclick="toggleSound()" title="Disable Sound"><i class="fas fa-volume-up"></i></button>
+                <button class="control-btn btn-primary" id="nextBtn" onclick="showNextModal()" title="Next Partner"><i class="fas fa-step-forward"></i></button>
+                <button class="control-btn btn-danger" id="hangupBtn" onclick="showHangupModal()" title="Hangup"><i class="fas fa-phone-slash"></i></button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        // WebSocket Connection
+        const socket = io();
+
+        // State
+        let userId = localStorage.getItem('vchat_userid');
+        let currentCallId = null;
+        let isCaller = false;
+        
+        let currentFacingMode = 'user'; 
+        let remoteFacingMode = 'user';  
+        
+        let iceCandidatesQueue = [];
+
+        // Timers and locks
+        let connectionEstablished = false;
+        let callStartTime = 0;
+
+        // WebRTC
+        const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+        let peerConnection;
+        let localStream, remoteStream;
+
+        // DOM Elements
+        const video1 = document.getElementById('video1');
+        const video2 = document.getElementById('video2');
+        const callScreen = document.getElementById('call-screen');
+        const hangupBtn = document.getElementById('hangupBtn');
+        const connectingOverlay = document.getElementById('callConnectingOverlay');
+
+        // Socket Events
+        socket.on('connect', () => {
+            if (userId) {
+                socket.emit('auth', userId);
+            } else {
+                const regScreen = document.getElementById('registration-screen');
+                regScreen.style.display = 'flex';
+                setTimeout(() => regScreen.classList.add('active'), 10);
+            }
+        });
+
+        socket.on('match_found', async (data) => {
+            document.getElementById('search-overlay').classList.remove('active');
+            document.getElementById('home-screen').style.display = 'none';
+            callScreen.style.display = 'block';
+            
+            currentCallId = data.call_id;
+            isCaller = data.is_caller;
+
+            resetUIForNewCall();
+            await setupMedia();
+            startWebRTC(isCaller);
+        });
+
+        socket.on('signal', async (incoming) => {
+            if (!peerConnection) return;
+            const { type, payload } = incoming;
+
+            try {
+                if (type === 'offer' && !isCaller) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
+                    const answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    socket.emit('signal', { type: 'answer', payload: peerConnection.localDescription });
+                    processIceQueue();
+                } else if (type === 'answer' && isCaller) {
+                    await peerConnection.setRemoteDescription(new RTCSessionDescription(payload));
+                    processIceQueue();
+                } else if (type === 'ice') {
+                    if (peerConnection.remoteDescription) {
+                        await peerConnection.addIceCandidate(new RTCIceCandidate(payload));
+                    } else {
+                        iceCandidatesQueue.push(payload);
+                    }
+                } else if (type === 'media_status') {
+                    if (payload.mic !== undefined) document.getElementById('remote-mic-muted').style.display = payload.mic ? 'flex' : 'none';
+                    if (payload.speaker !== undefined) document.getElementById('remote-speaker-muted').style.display = payload.speaker ? 'flex' : 'none';
+                } else if (type === 'camera_mode') {
+                    remoteFacingMode = payload.facingMode || 'user';
+                    updateVideoTransforms();
+                }
+            } catch (e) {
+                console.error("WebRTC Error:", e);
+            }
+        });
+
+        socket.on('partner_left', () => {
+            partnerLeft();
+        });
+
+        window.addEventListener('beforeunload', () => {
+            if (currentCallId) socket.emit('end_call', currentCallId);
+        });
+
+        function showAlert(msg) {
+            document.getElementById('customAlertText').innerText = msg;
+            const alertBox = document.getElementById('customAlert');
+            alertBox.style.display = 'block';
+            setTimeout(() => { alertBox.style.display = 'none'; }, 4000);
+        }
+
+        function registerUser() {
+            socket.emit('register', (response) => {
+                if (response.success) {
+                    userId = response.user_id;
+                    localStorage.setItem('vchat_userid', userId);
+                    const regScreen = document.getElementById('registration-screen');
+                    regScreen.classList.remove('active');
+                    setTimeout(() => { regScreen.style.display = 'none'; }, 500);
+                } else {
+                    showAlert("Registration failed.");
+                }
+            });
+        }
+
+        function startSearch() {
+            document.getElementById('search-overlay').classList.add('active');
+            socket.emit('start_search');
+        }
+
+        function cancelSearch() {
+            document.getElementById('search-overlay').classList.remove('active');
+            socket.emit('cancel_search');
+        }
+
+        function resetUIForNewCall() {
+            connectingOverlay.style.display = 'flex'; 
+            hangupBtn.innerHTML = '<i class="fas fa-phone-slash"></i>';
+            hangupBtn.className = 'control-btn btn-danger';
+            hangupBtn.onclick = showHangupModal;
+
+            document.getElementById('muteBtn').innerHTML = '<i class="fas fa-microphone"></i>';
+            document.getElementById('muteBtn').classList.remove('btn-danger');
+            document.getElementById('soundBtn').innerHTML = '<i class="fas fa-volume-up"></i>';
+            document.getElementById('soundBtn').classList.remove('btn-danger');
+
+            document.getElementById('remote-mic-muted').style.display = 'none';
+            document.getElementById('remote-speaker-muted').style.display = 'none';
+
+            connectionEstablished = false;
+            callStartTime = 0;
+            currentFacingMode = 'user';
+            remoteFacingMode = 'user';
+            iceCandidatesQueue = [];
+            
+            updateVideoTransforms();
+        }
+
+        function updateVideoTransforms() {
+            video1.style.transform = currentFacingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)';
+            video2.style.transform = remoteFacingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)';
+        }
+
+        async function setupMedia() {
+            if (!localStream) {
+                try {
+                    localStream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { facingMode: currentFacingMode }, 
+                        audio: { noiseSuppression: true, echoCancellation: true } 
+                    });
+                } catch (e) {
+                    console.warn("High quality failed. Trying without video...", e);
+                    try {
+                        localStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                        showAlert("Camera not found or access denied. Audio only mode active.");
+                    } catch (err) {
+                        localStream = new MediaStream();
+                        showAlert("Camera/Mic not accessible. You are in View-Only mode.");
+                    }
+                }
+            } else {
+                localStream.getAudioTracks().forEach(track => track.enabled = true);
+            }
+            
+            video1.srcObject = localStream;
+            video1.muted = true;
+            video1.className = 'floating-video';
+            video1.play().catch(e => console.error("Local play error:", e));
+
+            video2.srcObject = null;
+            video2.className = 'fullscreen-video';
+            video2.muted = false;
+        }
+
+        async function swapCamera() {
+            if (!localStream || localStream.getVideoTracks().length === 0) return;
+            currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            
+            try {
+                const newStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: currentFacingMode },
+                    audio: { noiseSuppression: true, echoCancellation: true }
+                });
+                
+                const newVideoTrack = newStream.getVideoTracks()[0];
+                const oldVideoTrack = localStream.getVideoTracks()[0];
+                
+                if (oldVideoTrack) {
+                    localStream.removeTrack(oldVideoTrack);
+                    oldVideoTrack.stop();
+                }
+                localStream.addTrack(newVideoTrack);
+                video1.srcObject = localStream;
+                updateVideoTransforms();
+                
+                socket.emit('signal', { type: 'camera_mode', payload: { facingMode: currentFacingMode } });
+                
+                if (peerConnection) {
+                    const sender = peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(newVideoTrack);
+                }
+            } catch(e) {
+                showAlert("Could not switch camera.");
+                currentFacingMode = currentFacingMode === 'user' ? 'environment' : 'user';
+            }
+        }
+
+        function startWebRTC(isCaller) {
+            socket.emit('signal', { type: 'camera_mode', payload: { facingMode: currentFacingMode } });
+            
+            peerConnection = new RTCPeerConnection(rtcConfig);
+
+            peerConnection.oniceconnectionstatechange = () => {
+                if (peerConnection.iceConnectionState === 'connected' || peerConnection.iceConnectionState === 'completed') {
+                    connectingOverlay.style.display = 'none';
+                    if (!connectionEstablished) {
+                        connectionEstablished = true;
+                        callStartTime = Date.now();
+                    }
+                } else if (peerConnection.iceConnectionState === 'disconnected' || peerConnection.iceConnectionState === 'failed') {
+                    showAlert("Your partner went offline");
+                    partnerLeft();
+                }
+            };
+
+            const hasAudio = localStream && localStream.getAudioTracks().length > 0;
+            const hasVideo = localStream && localStream.getVideoTracks().length > 0;
+
+            if (hasAudio) peerConnection.addTrack(localStream.getAudioTracks()[0], localStream);
+            else peerConnection.addTransceiver('audio', { direction: 'recvonly' });
+
+            if (hasVideo) peerConnection.addTrack(localStream.getVideoTracks()[0], localStream);
+            else peerConnection.addTransceiver('video', { direction: 'recvonly' });
+
+            peerConnection.ontrack = event => {
+                remoteStream = event.streams[0];
+                video2.srcObject = remoteStream;
+                video2.play().catch(e => console.error("Remote play error:", e));
+            };
+
+            peerConnection.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit('signal', { type: 'ice', payload: event.candidate });
+                }
+            };
+
+            if (isCaller) {
+                peerConnection.createOffer()
+                    .then(offer => peerConnection.setLocalDescription(offer))
+                    .then(() => {
+                        socket.emit('signal', { type: 'offer', payload: peerConnection.localDescription });
+                    });
+            }
+        }
+
+        async function processIceQueue() {
+            for (let candidate of iceCandidatesQueue) {
+                try {
+                    await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (e) { console.error("Error adding queued ICE:", e); }
+            }
+            iceCandidatesQueue = [];
+        }
+
+        function swapVideos() {
+            if (video1.classList.contains('floating-video')) {
+                video1.className = 'fullscreen-video'; video2.className = 'floating-video';
+            } else {
+                video1.className = 'floating-video'; video2.className = 'fullscreen-video';
+            }
+        }
+
+        callScreen.addEventListener('click', (e) => {
+            if (e.target.closest('.control-btn') || e.target.closest('.swap-cam-btn')) return;
+            if (e.target.classList.contains('floating-video')) swapVideos();
+        });
+
+        function toggleMute() {
+            if (localStream && localStream.getAudioTracks().length > 0) {
+                const audioTrack = localStream.getAudioTracks()[0];
+                audioTrack.enabled = !audioTrack.enabled;
+                const icon = document.getElementById('muteBtn');
+                icon.innerHTML = audioTrack.enabled ? '<i class="fas fa-microphone"></i>' : '<i class="fas fa-microphone-slash"></i>';
+                icon.classList.toggle('btn-danger', !audioTrack.enabled);
+                socket.emit('signal', { type: 'media_status', payload: {mic: !audioTrack.enabled} });
+            }
+        }
+
+        function toggleSound() {
+            video2.muted = !video2.muted;
+            const icon = document.getElementById('soundBtn');
+            icon.innerHTML = !video2.muted ? '<i class="fas fa-volume-up"></i>' : '<i class="fas fa-volume-mute"></i>';
+            icon.classList.toggle('btn-danger', video2.muted);
+            socket.emit('signal', { type: 'media_status', payload: {speaker: video2.muted} });
+        }
+
+        function getCallDuration() { return connectionEstablished ? (Date.now() - callStartTime) : 0; }
+
+        function showNextModal() {
+            if (getCallDuration() < 10000) return showAlert("Wait 10 seconds before skipping.");
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmNextModal')).show();
+        }
+
+        function showHangupModal() {
+            if (getCallDuration() < 10000) return showAlert("Wait 10 seconds before hanging up.");
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmHangupModal')).show();
+        }
+
+        function partnerLeft() {
+            connectingOverlay.style.display = 'none'; 
+            if (remoteStream) {
+                remoteStream.getTracks().forEach(track => track.stop());
+                remoteStream = null;
+            }
+            if (video1.srcObject !== localStream) { video1.srcObject = null; video1.load(); }
+            if (video2.srcObject !== localStream) { video2.srcObject = null; video2.load(); }
+            
+            hangupBtn.innerHTML = '<i class="fas fa-home"></i>';
+            hangupBtn.className = 'control-btn btn-light-green';
+            hangupBtn.onclick = goHome;
+            showAlert("Partner has left the call.");
+            cleanupCall();
+        }
+
+        function executeEndCall() {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmHangupModal')).hide();
+            if (currentCallId) socket.emit('end_call', currentCallId);
+            goHome();
+        }
+
+        function executeNextCall() {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('confirmNextModal')).hide();
+            if (currentCallId) socket.emit('end_call', currentCallId);
+            cleanupCall();
+            startSearch(); 
+        }
+
+        function cleanupCall() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (remoteStream) {
+                remoteStream.getTracks().forEach(track => track.stop());
+                remoteStream = null;
+            }
+            currentCallId = null;
+        }
+
+        function goHome() {
+            cleanupCall();
+            connectingOverlay.style.display = 'none';
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            callScreen.style.display = 'none';
+            document.getElementById('home-screen').style.display = 'flex';
+        }
+    </script>
+</body>
+</html>
