@@ -39,10 +39,36 @@ try {
     pool = mysql.createPool(dbConfig);
     console.log("Database pool configured with Railway credentials.");
     
-    // Test the connection immediately on startup
+    // Test the connection immediately on startup and create tables if missing
     pool.getConnection()
-        .then(conn => {
+        .then(async (conn) => {
             console.log("Successfully connected to MySQL database!");
+            
+            try {
+                // Auto-create the users table
+                await conn.query(`
+                    CREATE TABLE IF NOT EXISTS users (
+                        user_id VARCHAR(255) PRIMARY KEY,
+                        last_seen DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+                    )
+                `);
+                
+                // Auto-create the calls table
+                await conn.query(`
+                    CREATE TABLE IF NOT EXISTS calls (
+                        id INT AUTO_INCREMENT PRIMARY KEY,
+                        caller_id VARCHAR(255),
+                        receiver_id VARCHAR(255),
+                        status VARCHAR(50) DEFAULT 'active',
+                        start_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+                        end_time DATETIME
+                    )
+                `);
+                console.log("Database tables verified/created successfully.");
+            } catch (tableError) {
+                console.error("Error creating tables:", tableError);
+            }
+            
             conn.release();
         })
         .catch(err => {
